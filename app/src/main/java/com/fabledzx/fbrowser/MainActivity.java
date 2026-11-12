@@ -14,6 +14,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -38,6 +39,9 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private ImageButton btnBack, btnForward, btnReload, btnHome, btnGo;
 
+    /** 广告拦截管理器 */
+    private AdBlockerManager adBlocker;
+
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,6 +56,10 @@ public class MainActivity extends AppCompatActivity {
         btnReload   = findViewById(R.id.btnReload);
         btnHome     = findViewById(R.id.btnHome);
         btnGo       = findViewById(R.id.btnGo);
+
+        // 初始化广告拦截（异步加载拦截库，不阻塞 UI）
+        adBlocker = new AdBlockerManager();
+        adBlocker.init();
 
         setupWebView();
         setupUrlBar();
@@ -93,19 +101,30 @@ public class MainActivity extends AppCompatActivity {
 
         webView.setWebViewClient(new WebViewClient() {
 
-            // API 24+
+            /* ---------- 广告拦截核心 ---------- */
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String url = request.getUrl().toString();
+                if (adBlocker != null && adBlocker.shouldBlock(url)) {
+                    // 返回空响应，阻止广告资源加载
+                    return new WebResourceResponse("text/plain", "utf-8", null);
+                }
+                return super.shouldInterceptRequest(view, request);
+            }
+
+            /* ---------- URL 跳转处理 ---------- */
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return handleScheme(request.getUrl().toString());
             }
 
-            // API 21 ~ 23
             @Override
             @SuppressWarnings("deprecation")
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 return handleScheme(url);
             }
 
+            /* ---------- 页面加载回调 ---------- */
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 progressBar.setVisibility(View.VISIBLE);
@@ -149,7 +168,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean handleScheme(String url) {
         if (url == null) return false;
         if (url.startsWith("http://") || url.startsWith("https://")) {
-            return false; // 交给 WebView 自己加载
+            return false;
         }
         try {
             Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
@@ -189,7 +208,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /** 解析输入：网址 or 搜索关键词 */
     private void navigate(String input) {
         String text = input == null ? "" : input.trim();
         if (text.isEmpty()) return;
@@ -201,7 +219,7 @@ public class MainActivity extends AppCompatActivity {
         } else if (looksLikeHost(text)) {
             url = "https://" + text;
         } else {
-            url = SEARCH_PREFIX + Uri.encode(text);   // 默认 Bing 搜索
+            url = SEARCH_PREFIX + Uri.encode(text);
         }
         hideKeyboard();
         urlBar.clearFocus();
@@ -217,7 +235,7 @@ public class MainActivity extends AppCompatActivity {
         if (colon >= 0) host = host.substring(0, colon);
         if (host.isEmpty()) return false;
         if (host.equalsIgnoreCase("localhost")) return true;
-        if (host.matches("\\d{1,3}(\\.\\d{1,3}){3}")) return true;   // IPv4
+        if (host.matches("\\d{1,3}(\\.\\d{1,3}){3}")) return true;
         return host.contains(".") && host.matches("[A-Za-z0-9.\\-]+");
     }
 
