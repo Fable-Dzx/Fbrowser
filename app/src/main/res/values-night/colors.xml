@@ -1,0 +1,8 @@
+<resources>
+    <color name="toolbar_bg">#1E1E1E</color>
+    <color name="urlbar_bg">#2D2D2D</color>
+    <color name="icon_tint">#E8EAED</color>
+    <color name="text_primary">#E8EAED</color>
+    <color name="text_hint">#9AA0A6</color>
+    <color name="divider">#3A3A3A</color>
+</resources>

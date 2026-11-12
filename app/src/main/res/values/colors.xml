@@ -1,0 +1,10 @@
+<resources>
+    <color name="primary">#1565C0</color>
+    <color name="primary_dark">#0D47A1</color>
+    <color name="toolbar_bg">#FFFFFF</color>
+    <color name="urlbar_bg">#F1F3F4</color>
+    <color name="icon_tint">#5F6368</color>
+    <color name="text_primary">#202124</color>
+    <color name="text_hint">#9AA0A6</color>
+    <color name="divider">#E0E0E0</color>
+</resources>
