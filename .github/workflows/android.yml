@@ -3,9 +3,6 @@ name: Build FBrowser APK
 on:
   push:
     branches: [ main, master ]
-    tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 创建 tag 需要完整历史
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -26,7 +25,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # 核心修复：升级到 v4.0.4，并显式指定 packages
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4.0.4
         with:
@@ -36,10 +34,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.2'
-
-      - name: Prepare wrapper
-        run: |
-          if [ -f ./gradlew ]; then chmod +x ./gradlew; fi
 
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
@@ -61,10 +55,29 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
 
+      # 计算滚动版本号
+      - name: Compute rolling version
+        id: version
+        run: |
+          N=$(( ${{ github.run_number }} - 1 ))
+          MAJOR=$(( N / 10 ))
+          MINOR=$(( N % 10 ))
+          echo "TAG=v${MAJOR}.${MINOR}" >> $GITHUB_OUTPUT
+          echo "Tag: v${MAJOR}.${MINOR}"
+
+      # 创建并推送 Git Tag
+      - name: Create Git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.TAG }}
+          git push origin ${{ steps.version.outputs.TAG }}
+
+      # 创建 Release 并附加 APK
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.TAG }}
           files: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/release/*.apk
