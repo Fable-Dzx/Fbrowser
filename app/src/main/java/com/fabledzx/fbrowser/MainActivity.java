@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
@@ -13,6 +14,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -27,19 +29,18 @@ import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.io.ByteArrayInputStream;
+
 public class MainActivity extends AppCompatActivity {
 
-    /** 默认主页（Bing） */
-    private static final String HOME_URL = "https://www.bing.com/";
-    /** 默认搜索（Bing） */
-    private static final String SEARCH_PREFIX = "https://www.bing.com/search?q=";
+    private static final String HOME_URL = "https://cn.bing.com/";
+    private static final String SEARCH_PREFIX = "https://cn.bing.com/search?q=";
 
     private WebView webView;
     private EditText urlBar;
     private ProgressBar progressBar;
     private ImageButton btnBack, btnForward, btnReload, btnHome, btnGo;
 
-    /** 广告拦截管理器 */
     private AdBlockerManager adBlocker;
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -57,7 +58,7 @@ public class MainActivity extends AppCompatActivity {
         btnHome     = findViewById(R.id.btnHome);
         btnGo       = findViewById(R.id.btnGo);
 
-        // 初始化广告拦截（异步加载拦截库，不阻塞 UI）
+        // 初始化广告拦截
         adBlocker = new AdBlockerManager();
         adBlocker.init();
 
@@ -101,13 +102,22 @@ public class MainActivity extends AppCompatActivity {
 
         webView.setWebViewClient(new WebViewClient() {
 
-            /* ---------- 广告拦截核心 ---------- */
+            /* ---------- 广告拦截核心（修复版） ---------- */
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                // 【核心修复】绝对不拦截主文档（HTML），防止出现 ERR_INVALID_RESPONSE 白屏
+                if (request.isForMainFrame()) {
+                    return super.shouldInterceptRequest(view, request);
+                }
+
                 String url = request.getUrl().toString();
                 if (adBlocker != null && adBlocker.shouldBlock(url)) {
-                    // 返回空响应，阻止广告资源加载
-                    return new WebResourceResponse("text/plain", "utf-8", null);
+                    // 返回空数据流，安全阻止子资源加载
+                    return new WebResourceResponse(
+                            "text/plain",
+                            "utf-8",
+                            new ByteArrayInputStream(new byte[0])
+                    );
                 }
                 return super.shouldInterceptRequest(view, request);
             }
@@ -139,10 +149,37 @@ public class MainActivity extends AppCompatActivity {
                 updateNavButtons();
             }
 
+            /* ---------- 错误处理（修复版） ---------- */
             @Override
-            public void onReceivedError(WebView view, int errorCode,
-                                        String description, String failingUrl) {
-                progressBar.setVisibility(View.GONE);
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                if (request.isForMainFrame()) {
+                    progressBar.setVisibility(View.GONE);
+                    // 加载本地自定义的错误页，避免系统原生错误页导致网址错乱
+                    String errorHtml = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'></head>"
+                            + "<body style='display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif;background-color:#f9f9f9;'>"
+                            + "<h2 style='color:#333;'>网页无法打开</h2>"
+                            + "<p style='color:#666;font-size:14px;padding:0 20px;text-align:center;word-break:break-all;'>"
+                            + request.getUrl().toString() + "</p>"
+                            + "<p style='color:#999;font-size:12px;'>错误码: " + error.getErrorCode() + "</p>"
+                            + "<button onclick='location.reload()' style='margin-top:20px;padding:8px 24px;background:#1565C0;color:#fff;border:none;border-radius:4px;font-size:16px;'>重新加载</button>"
+                            + "</body></html>";
+                    view.loadDataWithBaseURL(null, errorHtml, "text/html", "UTF-8", null);
+                }
+            }
+
+            // 兼容 API 23 以下的错误回调
+            @Override
+            @SuppressWarnings("deprecation")
+            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                    progressBar.setVisibility(View.GONE);
+                    String errorHtml = "<html><body style='text-align:center;padding-top:50px;font-family:sans-serif;'>"
+                            + "<h2>网页无法打开</h2><p style='color:gray;'>" + failingUrl + "</p>"
+                            + "<button onclick='location.reload()' style='margin-top:20px;padding:8px 24px;background:#1565C0;color:#fff;border:none;border-radius:4px;'>重新加载</button>"
+                            + "</body></html>";
+                    view.loadDataWithBaseURL(null, errorHtml, "text/html", "UTF-8", null);
+                }
             }
         });
 
@@ -164,7 +201,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /** 非 http(s) 协议交给系统处理（tel:、mailto:、intent: 等） */
     private boolean handleScheme(String url) {
         if (url == null) return false;
         if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -223,6 +259,10 @@ public class MainActivity extends AppCompatActivity {
         }
         hideKeyboard();
         urlBar.clearFocus();
+        
+        // 【修复】立刻更新地址栏，不再等待 WebView 的回调
+        updateUrlBar(url);
+        
         webView.loadUrl(url);
     }
 
